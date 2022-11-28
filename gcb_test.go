@@ -2,15 +2,15 @@ package gcb
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	//goleak.VerifyTestMain(m)
 }
 
 func TestGo(t *testing.T) {
@@ -23,6 +23,22 @@ func TestGo(t *testing.T) {
 	assert.True(t, prim)
 
 	if res != 1 {
+		t.Errorf(`Go(ctx, "test1", ...) = %v; want %v`, res, 1)
+	}
+}
+
+func TestFallback(t *testing.T) {
+	t.Parallel()
+
+	res, prim, _ := Go(context.Background(), "test1", func(context.Context) (int, error) {
+		return 1, fmt.Errorf("This is an error")
+	}, func(context.Context) (int, error) {
+		return 2, nil
+	})
+
+	assert.True(t, prim)
+
+	if res != 2 {
 		t.Errorf(`Go(ctx, "test1", ...) = %v; want %v`, res, 1)
 	}
 }

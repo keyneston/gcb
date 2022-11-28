@@ -3,7 +3,6 @@ package gcb
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -50,6 +49,23 @@ func processCircuit[T any](
 	primary func(context.Context) (T, error),
 	fallback func(context.Context) (T, error),
 ) (T, bool, error) {
+	res, err := handleFunction(ctx, name, settings, circuit, primary)
+	// If fallback is not defined or we received no errors return whatever we got
+	if fallback == nil || err == nil {
+		return res, true, err
+	}
+
+	res, err = handleFunction(ctx, name, settings, circuit, fallback)
+	return res, false, err
+}
+
+func handleFunction[T any](
+	ctx context.Context,
+	name string,
+	settings Settings,
+	circuit *Circuit,
+	fn func(context.Context) (T, error),
+) (T, error) {
 	timer := time.NewTimer(settings.Timeout.D())
 	defer cleanTimer(timer)
 
@@ -59,8 +75,7 @@ func processCircuit[T any](
 	// TODO thing here to setup context
 
 	go func() {
-		res, err := primary(ctx)
-		log.Printf("got %v, %v from primary", res, err)
+		res, err := fn(ctx)
 		tChan <- res
 		errChan <- err
 
@@ -88,13 +103,13 @@ func processCircuit[T any](
 			}
 			errReceived = true
 		case <-timer.C:
-			return ret, false, Error{
+			return ret, Error{
 				Name:    name,
 				Type:    ErrorTimeout,
 				Message: fmt.Sprintf("timeout after %v", settings.Timeout),
 			}
 		case <-ctx.Done():
-			return ret, false, Error{
+			return ret, Error{
 				Name:    name,
 				Type:    ErrorContext,
 				Message: fmt.Sprintf("context done"),
@@ -102,11 +117,10 @@ func processCircuit[T any](
 		}
 
 		if tReceived && errReceived {
-			log.Printf("received both returning: %v, %v", ret, retErr)
-			return ret, true, retErr
+			return ret, retErr
 		}
 	}
 
 	// TODO: handle fallback function
-	return ret, false, retErr
+	return ret, retErr
 }
