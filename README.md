@@ -27,3 +27,8 @@ circuits will trigger.
 
 * Use a pool or similar for things like timers to stop memory churn
 * API for gathering circuit data and values
+
+# TODOs
+
+- [ ] Ensure no leaking of threads
+- [ ] Rework errors so they work with errors.Is

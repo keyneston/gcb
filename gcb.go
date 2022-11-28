@@ -3,26 +3,9 @@ package gcb
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
+	"log"
 	"time"
 )
-
-var defaultSettings *atomic.Value = &atomic.Value{}
-
-func init() {
-	SetDefaultSettings(Settings{
-		Timeout:         time.Second,
-		FallbackTimeout: time.Second,
-	})
-}
-
-func GetDefaultSettings() Settings {
-	return *defaultSettings.Load().(*Settings)
-}
-
-func SetDefaultSettings(s Settings) {
-	defaultSettings.Store(&s)
-}
 
 type Error struct {
 	Name    string `json:"name"`
@@ -32,13 +15,6 @@ type Error struct {
 
 func (e Error) Error() string {
 	return fmt.Sprintf("%#q: %v", e.Name, e.Message)
-}
-
-type Settings struct {
-	Timeout         time.Duration
-	FallbackTimeout time.Duration
-
-	Percent float32
 }
 
 // Go calls your primary function, and if that fails calls your fallback
@@ -54,54 +30,83 @@ func Go[T any](
 	fallback func(context.Context) (T, error),
 ) (T, bool, error) {
 	settings := GetDefaultSettings()
-	timer := time.NewTimer(settings.Timeout)
+	circuit := GetCircuit(name)
+
+	return processCircuit(
+		ctx,
+		name,
+		settings,
+		circuit,
+		primary,
+		fallback,
+	)
+}
+
+func processCircuit[T any](
+	ctx context.Context,
+	name string,
+	settings Settings,
+	circuit *Circuit,
+	primary func(context.Context) (T, error),
+	fallback func(context.Context) (T, error),
+) (T, bool, error) {
+	timer := time.NewTimer(settings.Timeout.D())
 	defer cleanTimer(timer)
 
 	tChan := make(chan T, 1)
 	errChan := make(chan error, 1)
-	defer close(tChan)
-	defer close(errChan)
 
 	// TODO thing here to setup context
 
 	go func() {
 		res, err := primary(ctx)
+		log.Printf("got %v, %v from primary", res, err)
 		tChan <- res
 		errChan <- err
+
+		defer close(tChan)
+		defer close(errChan)
 	}()
 
-	var t T
-	var err error
+	var ret T
+	var retErr error
 
 	var tReceived, errReceived bool
 
 	for {
 		select {
-		case t = <-tChan:
+		case t, ok := <-tChan:
+			// If this is a channel closed message don't update the return value.
+			if ok {
+				ret = t
+			}
 			tReceived = true
-			if errReceived {
-				return t, true, err
+		case err, ok := <-errChan:
+			// If this is a channel closed message don't update the return value.
+			if ok {
+				retErr = err
 			}
-		case err = <-errChan:
 			errReceived = true
-			if tReceived {
-				return t, true, err
-			}
 		case <-timer.C:
-			return t, false, Error{
+			return ret, false, Error{
 				Name:    name,
 				Type:    ErrorTimeout,
 				Message: fmt.Sprintf("timeout after %v", settings.Timeout),
 			}
 		case <-ctx.Done():
-			return t, false, Error{
+			return ret, false, Error{
 				Name:    name,
 				Type:    ErrorContext,
 				Message: fmt.Sprintf("context done"),
 			}
 		}
+
+		if tReceived && errReceived {
+			log.Printf("received both returning: %v, %v", ret, retErr)
+			return ret, true, retErr
+		}
 	}
 
 	// TODO: handle fallback function
-	return t, true, err
+	return ret, false, retErr
 }
