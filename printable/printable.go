@@ -23,3 +23,8 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 func (d Duration) D() time.Duration {
 	return time.Duration(d)
 }
+
+func Dur(t time.Duration) *Duration {
+	d := Duration(t)
+	return &d
+}

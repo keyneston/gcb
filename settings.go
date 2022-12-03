@@ -1,6 +1,9 @@
 package gcb
 
 import (
+	"encoding/json"
+	"log"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -14,11 +17,20 @@ var defaultSettings *atomic.Value = &atomic.Value{}
 var Separator = "!"
 
 func init() {
-	timeout := printable.Duration(time.Second)
+	timeout := printable.Dur(time.Second)
 	SetDefaultSettings(Settings{
-		Timeout:         &timeout,
-		FallbackTimeout: &timeout,
+		Timeout:         timeout,
+		FallbackTimeout: timeout,
 	})
+}
+
+func mustJSON(v any) string {
+	out, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		log.Fatalf("JSON shouldn't fail to encode: %v", err)
+	}
+
+	return string(out)
 }
 
 func GetDefaultSettings() Settings {
@@ -33,12 +45,26 @@ type Tree struct {
 	*node
 }
 
-func (r *Tree) Get(key string) *node {
+func (r *Tree) String() string {
+	return mustJSON(r)
+}
+
+func (r *Tree) Get(key string) Settings {
+	split := splitName(key)
+	results := make([]namedSetting, 0, len(split))
+
 	n := r.node
+loop:
 	for n != nil {
+		for _, needle := range split {
+			if n.Name == needle {
+				results = append(results, namedSetting{n.Name, n.GetSettings()})
+			}
+		}
+
 		switch strings.Compare(key, n.Name) {
 		case 0:
-			return n
+			break loop
 		case -1:
 			n = n.Left
 		case 1:
@@ -46,25 +72,37 @@ func (r *Tree) Get(key string) *node {
 		}
 	}
 
-	return nil
+	sort.Sort(namedSettings(results))
+
+	final := &Settings{}
+	for _, r := range results {
+		final.Merge(&r.Settings)
+	}
+
+	return *final
 }
 
 func (r *Tree) set(name string, settings Settings) error {
-	segments := strings.Split(name, Separator)
+	segments := splitName(name)
 
 	// TODO: what is the correct behaviour if a name is already set.
 	// TODO: some type of rebalancing
-	for i := range segments {
-		name := strings.Join(segments[0:i], Separator)
+	for _, name := range segments {
+		//name := strings.Join(segments[0:i], Separator)
 		if r.node == nil {
 			r.node = &node{Name: name}
 		}
 
 		n := &r.node
+	tree_descent:
 		for *n != nil {
-			if strings.Compare(name, (*n).Name) < 0 {
+			switch strings.Compare(name, (*n).Name) {
+			case 0:
+				(*n).setSettings(settings)
+				break tree_descent
+			case -1:
 				n = &(*n).Left
-			} else {
+			case 1:
 				n = &(*n).Right
 			}
 		}
@@ -120,7 +158,52 @@ func (n *node) Circuit() *Circuit {
 // Everything is a nil-pointer to allow optional settings.
 type Settings struct {
 	Timeout         *printable.Duration `json:"timeout"`
+	PrimaryTimeout  *printable.Duration `json:"primary_timeout"`
 	FallbackTimeout *printable.Duration `json:"fallback_timeout"`
 
-	Percent *float32 `json:"percent"`
+	BreakPercent *float32 `json:"break_percent"`
+}
+
+func (s Settings) String() string {
+	return mustJSON(s)
+}
+
+func (s *Settings) Merge(s2 *Settings) {
+	if s2 == nil {
+		return
+	}
+
+	if s2.Timeout != nil {
+		s.Timeout = s2.Timeout
+	}
+	if s2.PrimaryTimeout != nil {
+		s.PrimaryTimeout = s2.PrimaryTimeout
+	}
+	if s2.FallbackTimeout != nil {
+		s.FallbackTimeout = s2.FallbackTimeout
+	}
+	if s2.BreakPercent != nil {
+		s.BreakPercent = s2.BreakPercent
+	}
+}
+
+type namedSetting struct {
+	Name     string
+	Settings Settings
+}
+
+func (n namedSetting) String() string {
+	return mustJSON(n)
+}
+
+type namedSettings []namedSetting
+
+func (s namedSettings) Len() int {
+	return len(s)
+}
+func (s namedSettings) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s namedSettings) Less(i, j int) bool {
+	return len(s[i].Name) < len(s[j].Name)
 }

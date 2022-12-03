@@ -9,10 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMain(m *testing.M) {
-	//goleak.VerifyTestMain(m)
-}
-
 func TestGo(t *testing.T) {
 	t.Parallel()
 

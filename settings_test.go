@@ -1,37 +1,30 @@
 package gcb
 
 import (
-	"encoding/json"
-	"log"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/keyneston/gcb/printable"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTreeGet(t *testing.T) {
-	t.Skip()
-
 	r := &Tree{}
 
-	timeout := printable.Duration(time.Second)
-	s := Settings{Timeout: &timeout}
+	r.set("foo", Settings{Timeout: printable.Dur(time.Second)})
+	r.set("foo!bar!baz", Settings{FallbackTimeout: printable.Dur(5 * time.Second)})
+	r.set("foo!bar", Settings{Timeout: printable.Dur(time.Second * 2)})
 
-	r.set("foo", s)
-	r.set("foo!bar!baz", s)
-	r.set("foo!bar", s)
-
-	t.Errorf("Tree: %#v", r)
-
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "    ")
-
-	enc.Encode(r)
-
-	n := r.Get("foo!bar!baz")
-	log.Printf("Got n: %#v", n)
+	needle := "foo!bar!baz"
+	s := r.Get(needle)
+	require.NotNil(t, s, "settings must not be nil")
+	require.NotNil(t, s.Timeout, "Timeout must not be nil")
+	require.NotNil(t, s.FallbackTimeout, "FallbackTimeout must not be nil")
+	require.Equalf(t, time.Second*2, time.Duration(*s.Timeout),
+		"s.Timeout = %v; want %v", s.Timeout, time.Second*3)
+	require.Equalf(t, time.Second*5, time.Duration(*s.FallbackTimeout),
+		"s.FallbackTimeout = %v; want %v", s.FallbackTimeout, time.Second*5)
 }
 
 func TestSplitName(t *testing.T) {

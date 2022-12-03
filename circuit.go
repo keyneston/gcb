@@ -5,7 +5,8 @@ func GetCircuit(name string) *Circuit {
 }
 
 type Circuit struct {
-	name string
+	name    string
+	percent int32
 }
 
 func NewCircuit(name string) *Circuit {
